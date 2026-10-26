@@ -174,6 +174,8 @@ export interface DnsRecord {
   priority?: number;
   purpose: string;
   status: "pending" | "verified";
+  /** False for a recommended record (DMARC), which is not needed to verify the domain. */
+  required: boolean;
 }
 
 export interface Domain {
@@ -183,7 +185,6 @@ export interface Domain {
   status: "pending" | "verified" | "failed";
   dkim_selector: string;
   dkim_public_key: string;
-  spf_record: string;
   dmarc_record: string;
   return_path_domain: string;
   dns_records: DnsRecord[];
@@ -208,7 +209,8 @@ export interface DomainVerification {
     dns_lookup_performed: boolean;
     dkim_host: string;
     dkim_found_in_dns: boolean;
-    spf_found_in_dns: boolean;
+    return_path_found_in_dns: boolean;
+    dmarc_found_in_dns: boolean;
     mode: "verified" | "pending_dns_propagation";
   };
 }
