@@ -190,6 +190,10 @@ export interface Domain {
   dns_records: DnsRecord[];
   open_tracking_enabled: boolean;
   click_tracking_enabled: boolean;
+  /** The domain (or its subdomain) that receives email; empty while inbound is off. */
+  inbound_domain: string;
+  /** The MX record the inbound domain needs; on a single domain while inbound is on. */
+  inbound_record?: DnsRecord;
   verified_at?: string;
   created_at: string;
 }
@@ -201,6 +205,8 @@ export interface CreateDomainParams {
 export interface UpdateDomainParams {
   open_tracking_enabled?: boolean;
   click_tracking_enabled?: boolean;
+  /** Receive email on this domain or a subdomain of it; `""` turns inbound off. */
+  inbound_domain?: string;
 }
 
 export interface DomainVerification {
@@ -211,6 +217,8 @@ export interface DomainVerification {
     dkim_found_in_dns: boolean;
     return_path_found_in_dns: boolean;
     dmarc_found_in_dns: boolean;
+    /** Present while inbound is on. */
+    inbound_mx_found_in_dns?: boolean;
     mode: "verified" | "pending_dns_propagation";
   };
 }
@@ -275,6 +283,57 @@ export interface CreateSuppressionParams {
   email_address: string;
 }
 
+// Inbound
+
+/** An SPF, DKIM or DMARC result. */
+export type AuthResult = "pass" | "fail" | "softfail" | "neutral" | "none" | "temperror" | "permerror" | (string & {});
+
+export interface InboundAttachment {
+  filename: string;
+  content_type: string;
+  /** Bytes. */
+  size: number;
+  /** Set for an inline image the HTML shows as `cid:<content_id>`. */
+  content_id?: string;
+}
+
+export interface InboundEmail {
+  id: string;
+  workspace_id: string;
+  domain_id: string;
+  envelope_from: string;
+  /** The address it was delivered to: one inbound email per recipient. */
+  recipient: string;
+  remote_ip: string;
+  from: string;
+  to: string[];
+  cc: string[];
+  reply_to: string;
+  subject: string;
+  message_id: string;
+  in_reply_to: string;
+  references: string;
+  text: string;
+  html: string;
+  /** Only from `inbound.get`. */
+  headers?: Record<string, string[]>;
+  attachments: InboundAttachment[];
+  size_bytes: number;
+  spf: AuthResult;
+  dkim: AuthResult;
+  dmarc: AuthResult;
+  /** The sender's domain failed DMARC and asks receivers to quarantine or reject it. */
+  spam: boolean;
+  credits_used: number;
+  /** Set once the content was deleted, 30 days after it arrived. */
+  content_purged_at?: string;
+  created_at: string;
+}
+
+export interface ListInboundParams extends ListParams {
+  q?: string;
+}
+
 // Webhooks
 
 export type WebhookEventType =
@@ -284,7 +343,8 @@ export type WebhookEventType =
   | "email.complained"
   | "email.opened"
   | "email.clicked"
-  | "email.failed";
+  | "email.failed"
+  | "email.received";
 
 export interface Webhook {
   id: string;
@@ -335,11 +395,11 @@ export interface ListWebhookDeliveriesParams extends ListParams {
 }
 
 /** The JSON body Postilon posts to a webhook endpoint. Narrow on `type`. */
-export type WebhookEvent = EmailWebhookEvent | TestWebhookEvent;
+export type WebhookEvent = EmailWebhookEvent | InboundWebhookEvent | TestWebhookEvent;
 
 export interface EmailWebhookEvent {
   id: string;
-  type: WebhookEventType;
+  type: Exclude<WebhookEventType, "email.received">;
   created_at: string;
   workspace_id: string;
   data: {
@@ -351,6 +411,33 @@ export interface EmailWebhookEvent {
     status: EmailStatus;
     metadata: Record<string, string> | null;
     tags: Tag[] | null;
+  };
+}
+
+/** `email.received`: a message arrived on an inbound domain. */
+export interface InboundWebhookEvent {
+  id: string;
+  type: "email.received";
+  created_at: string;
+  workspace_id: string;
+  data: {
+    inbound_id: string;
+    from: string;
+    to: string[];
+    cc: string[];
+    reply_to: string;
+    recipient: string;
+    subject: string;
+    message_id: string;
+    in_reply_to: string;
+    /** Empty, with `body_truncated`, when text and HTML together exceed 256 KB. */
+    text: string;
+    html: string;
+    body_truncated: boolean;
+    attachments: InboundAttachment[];
+    auth: { spf: AuthResult; dkim: AuthResult; dmarc: AuthResult };
+    spam: boolean;
+    received_at: string;
   };
 }
 

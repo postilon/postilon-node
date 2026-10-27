@@ -31,7 +31,7 @@ const email = await postilon.emails.send({
 
 `send` takes every field of [`POST /v1/emails`](https://postilon.com/docs/sending): `cc`, `bcc`, `reply_to`, `headers`, `tags`, `attachments` (Base64 `content`, or a `file_id` from `postilon.files.upload`), `template_id` with `variables`, and `scheduled_at`. CommonJS works too: `const { Postilon } = require("@postilon/node")`.
 
-The client also covers `emails.sendBatch`, `get`, `list` and `cancel`, and `domains`, `templates`, `files`, `suppressions` and `webhooks`.
+The client also covers `emails.sendBatch`, `get`, `list` and `cancel`, and `domains`, `templates`, `files`, `suppressions`, `webhooks` and `inbound`.
 
 ## Test keys
 
@@ -109,6 +109,17 @@ app.post("/webhooks/postilon", express.raw({ type: "application/json" }), (req, 
 ```
 
 `postilon.webhooks.verifySignature(...)` is the same function. Answer with a `2xx` within 8 seconds and do slow work afterwards. Events can arrive more than once and out of order, so use the event `id` to ignore duplicates. See [Webhooks](https://postilon.com/docs/webhooks).
+
+## Receive email
+
+Turn on inbound for a verified domain (or a subdomain of it), and add the MX record it returns:
+
+```ts
+const domain = await postilon.domains.update("dom_…", { inbound_domain: "reply.acme.com" });
+// domain.inbound_record: { type: "MX", name: "reply.acme.com", value: "inbound.postilon.com", priority: 10, … }
+```
+
+Each message then reaches your webhooks as `email.received`, with its text and HTML (up to 256 KB), attachment list, SPF, DKIM and DMARC results and a `spam` flag. Narrow on `event.type === "email.received"` to get `event.data` typed. Read received email with `postilon.inbound.list`, `get`, `attachment(id, index)` (a `Uint8Array`) and `raw(id)` (the message as received). See [Inbound email](https://postilon.com/docs/inbound).
 
 ## License
 

@@ -208,3 +208,42 @@ describe("errors", () => {
     await assert.rejects(new Postilon(KEY).emails.get("msg_1"), (err) => err === failure);
   });
 });
+
+describe("inbound", () => {
+  it("lists and gets received email as JSON", async () => {
+    const calls = mockFetch(() => json(200, { object: "list", data: [], count: 0, total: 0, has_more: false }));
+    const inbound = new Postilon(KEY).inbound;
+    await inbound.list({ q: "order", limit: 10 });
+    await inbound.get("inb_1");
+    assert.equal(calls[0].url, "https://api.postilon.com/v1/inbound?q=order&limit=10");
+    assert.equal(calls[1].url, "https://api.postilon.com/v1/inbound/inb_1");
+  });
+
+  it("downloads an attachment as bytes and the raw message as text", async () => {
+    const bytes = new Uint8Array([0, 255, 1, 128]);
+    const calls = mockFetch((call) =>
+      call.url.endsWith("/raw")
+        ? new Response("Subject: hi\r\n\r\nbody", { headers: { "Content-Type": "message/rfc822" } })
+        : new Response(bytes, { headers: { "Content-Type": "application/octet-stream" } })
+    );
+    const inbound = new Postilon(KEY).inbound;
+    assert.deepEqual(await inbound.attachment("inb_1", 0), bytes);
+    assert.equal(await inbound.raw("inb_1"), "Subject: hi\r\n\r\nbody");
+    assert.equal(calls[0].url, "https://api.postilon.com/v1/inbound/inb_1/attachments/0");
+  });
+
+  it("throws PostilonError when the content was deleted", async () => {
+    mockFetch(() => json(410, { error: { code: "content_purged", message: "Deleted after 30 days." } }));
+    const err = await new Postilon(KEY).inbound.attachment("inb_1", 0).catch((e) => e);
+    assert.ok(err instanceof PostilonError);
+    assert.equal(err.status, 410);
+    assert.equal(err.code, "content_purged");
+  });
+
+  it("turns inbound on through domains.update", async () => {
+    const calls = mockFetch(() => json(200, { id: "dom_1", inbound_domain: "reply.acme.com" }));
+    await new Postilon(KEY).domains.update("dom_1", { inbound_domain: "reply.acme.com" });
+    assert.equal(calls[0].method, "PATCH");
+    assert.deepEqual(calls[0].body, { inbound_domain: "reply.acme.com" });
+  });
+});

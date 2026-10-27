@@ -10,8 +10,10 @@ import type {
   DomainVerification,
   Email,
   FileObject,
+  InboundEmail,
   List,
   ListEmailsParams,
+  ListInboundParams,
   ListParams,
   ListWebhookDeliveriesParams,
   SendBatchParams,
@@ -41,6 +43,8 @@ interface RequestOptions {
   query?: Query;
   body?: unknown;
   idempotencyKey?: string;
+  /** How to read a successful response: JSON (the default), bytes or text. */
+  as?: "json" | "bytes" | "text";
 }
 
 type RequestFn = <T>(method: string, path: string, options?: RequestOptions) => Promise<T>;
@@ -63,13 +67,14 @@ export class Postilon {
   readonly files: Files;
   readonly suppressions: Suppressions;
   readonly webhooks: Webhooks;
+  readonly inbound: Inbound;
 
   /** @param apiKey A `ps_live_…` or `ps_test_…` key. */
   constructor(apiKey: string, options: PostilonOptions = {}) {
     if (!apiKey) throw new Error("Postilon: an API key is required (ps_live_… or ps_test_…).");
     const baseUrl = (options.baseUrl ?? "https://api.postilon.com").replace(/\/+$/, "");
 
-    const request: RequestFn = async <T>(method: string, path: string, { query, body, idempotencyKey }: RequestOptions = {}) => {
+    const request: RequestFn = async <T>(method: string, path: string, { query, body, idempotencyKey, as }: RequestOptions = {}) => {
       const url = new URL(baseUrl + path);
       for (const [key, value] of Object.entries(query ?? {})) {
         if (value !== undefined) url.searchParams.set(key, String(value));
@@ -86,9 +91,10 @@ export class Postilon {
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
       });
+      if (res.ok && as === "bytes") return new Uint8Array(await res.arrayBuffer()) as T;
       const text = await res.text();
       if (!res.ok) throw errorFromResponse(res.status, res.headers, text);
-      return JSON.parse(text) as T;
+      return (as === "text" ? text : JSON.parse(text)) as T;
     };
 
     this.emails = new Emails(request);
@@ -97,6 +103,7 @@ export class Postilon {
     this.files = new Files(request);
     this.suppressions = new Suppressions(request);
     this.webhooks = new Webhooks(request);
+    this.inbound = new Inbound(request);
   }
 }
 
@@ -149,7 +156,7 @@ export class Domains {
     return this.request("POST", `/v1/domains/${id(domainId)}/verify`);
   }
 
-  /** Turns open or click tracking on or off. */
+  /** Turns open or click tracking on or off, or inbound email (`inbound_domain`, `""` for off). */
   update(domainId: string, params: UpdateDomainParams): Promise<Domain> {
     return this.request("PATCH", `/v1/domains/${id(domainId)}`, { body: params });
   }
@@ -269,5 +276,30 @@ export class Webhooks {
     options?: VerifySignatureOptions,
   ): boolean {
     return verifyWebhookSignature(rawBody, header, secret, options);
+  }
+}
+
+/** Email received on an inbound domain (https://postilon.com/docs/inbound). */
+export class Inbound {
+  constructor(private readonly request: RequestFn) {}
+
+  /** `GET /v1/inbound`, newest first; `q` searches the subject, sender and recipient. */
+  list(params: ListInboundParams = {}): Promise<List<InboundEmail>> {
+    return this.request("GET", "/v1/inbound", { query: { ...params } });
+  }
+
+  /** `GET /v1/inbound/{id}`, with its headers. */
+  get(inboundId: string): Promise<InboundEmail> {
+    return this.request("GET", `/v1/inbound/${id(inboundId)}`);
+  }
+
+  /** Attachment `index` (from 0, as in `attachments`), as bytes. */
+  attachment(inboundId: string, index: number): Promise<Uint8Array> {
+    return this.request("GET", `/v1/inbound/${id(inboundId)}/attachments/${index}`, { as: "bytes" });
+  }
+
+  /** The message as received (RFC 5322). */
+  raw(inboundId: string): Promise<string> {
+    return this.request("GET", `/v1/inbound/${id(inboundId)}/raw`, { as: "text" });
   }
 }
