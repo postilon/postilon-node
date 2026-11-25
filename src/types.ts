@@ -78,6 +78,8 @@ export interface SendEmailParams {
   tags?: Tag[];
   /** RFC 3339 time to send at, such as `2026-11-01T09:00:00Z`. */
   scheduled_at?: string;
+  /** The sending stream. Left out: the API key's stream, else `transactional`. */
+  stream?: string;
 }
 
 export interface SendEmailOptions {
@@ -106,6 +108,8 @@ export interface SendBatchParams {
   html?: string;
   text?: string;
   template_id?: string;
+  /** The sending stream for the whole batch. Left out: the API key's stream, else `transactional`. */
+  stream?: string;
   /** 1 to 100 emails, each with its own recipient and variables. */
   batch: Array<{ to: string; variables?: Record<string, string> }>;
 }
@@ -121,6 +125,8 @@ export interface ListEmailsParams extends ListParams {
   /** Searches the subject, ID, sender and recipients. */
   q?: string;
   source?: "api" | "smtp";
+  /** Only emails sent in this stream. */
+  stream?: string;
   /** Only emails created in the last N days. */
   days?: number;
 }
@@ -155,6 +161,8 @@ export interface Email {
   environment: "live" | "test";
   transport: "rest_api" | "rest_api_batch" | "smtp_relay";
   source: "api" | "smtp";
+  /** The sending stream, such as `transactional`. */
+  stream: string;
   credits_used: number;
   dkim_signed: boolean;
   events: EmailEvent[];
@@ -275,12 +283,39 @@ export interface Suppression {
   workspace_id: string;
   email_address: string;
   reason: "hard_bounce" | "complaint" | "unsubscribe" | "manual";
+  /** The stream it applies to; left out for every stream. */
+  stream?: string;
   source_email_id?: string;
   created_at: string;
 }
 
 export interface CreateSuppressionParams {
   email_address: string;
+  /** Defaults to `manual`. */
+  reason?: Suppression["reason"];
+  /** Suppress the address in this stream only; left out for every stream. */
+  stream?: string;
+}
+
+// Streams
+
+/** A sending stream: a kind of email, such as receipts, with its own suppressions. */
+export interface Stream {
+  /** 1 to 32 lowercase letters, digits or hyphens. */
+  name: string;
+  description: string;
+  /** True for `transactional`, which cannot be changed or deleted. */
+  default: boolean;
+  created_at: string;
+}
+
+export interface CreateStreamParams {
+  name: string;
+  description?: string;
+}
+
+export interface UpdateStreamParams {
+  description: string;
 }
 
 // Inbound
@@ -409,6 +444,8 @@ export interface EmailWebhookEvent {
     subject: string;
     recipient: string;
     status: EmailStatus;
+    /** The sending stream, such as `transactional`. */
+    stream: string;
     metadata: Record<string, string> | null;
     tags: Tag[] | null;
   };

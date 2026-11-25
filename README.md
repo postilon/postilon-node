@@ -29,9 +29,23 @@ const email = await postilon.emails.send({
 // { id: "msg_…", status: "queued", … }
 ```
 
-`send` takes every field of [`POST /v1/emails`](https://postilon.com/docs/sending): `cc`, `bcc`, `reply_to`, `headers`, `tags`, `attachments` (Base64 `content`, or a `file_id` from `postilon.files.upload`), `template_id` with `variables`, and `scheduled_at`. CommonJS works too: `const { Postilon } = require("@postilon/node")`.
+`send` takes every field of [`POST /v1/emails`](https://postilon.com/docs/sending): `cc`, `bcc`, `reply_to`, `headers`, `tags`, `attachments` (Base64 `content`, or a `file_id` from `postilon.files.upload`), `template_id` with `variables`, `scheduled_at` and `stream`. CommonJS works too: `const { Postilon } = require("@postilon/node")`.
 
-The client also covers `emails.sendBatch`, `get`, `list` and `cancel`, and `domains`, `templates`, `files`, `suppressions`, `webhooks` and `inbound`.
+The client also covers `emails.sendBatch`, `get`, `list` and `cancel`, and `domains`, `templates`, `files`, `suppressions`, `webhooks`, `inbound` and `streams`.
+
+## Streams
+
+Streams keep kinds of email apart, such as receipts and a newsletter, each with its own suppressions. Every workspace has the `transactional` stream, which cannot be changed or deleted. A stream name is 1 to 32 lowercase letters, digits or hyphens:
+
+```ts
+await postilon.streams.create({ name: "receipts", description: "Order receipts" });
+
+await postilon.emails.send({ from: "billing@acme.com", to: "jane@example.com", subject: "Receipt", text: "Thanks.", stream: "receipts" });
+await postilon.emails.list({ stream: "receipts" });
+await postilon.suppressions.create({ email_address: "jane@example.com", reason: "unsubscribe", stream: "receipts" });
+```
+
+Without `stream`, an email goes in the API key's stream, or else in `transactional`; `sendBatch` takes one `stream` for the whole batch. A key bound to a stream can send only in it (`403 stream_restricted`). A suppression without `stream` applies to every stream. Emails and email webhook events carry their `stream`. `streams` also has `list`, `get(name)`, `update(name, { description })` and `delete(name)`, which fails with `409 stream_in_use` while an active API key sends in the stream.
 
 ## Test keys
 
@@ -70,7 +84,7 @@ try {
 }
 ```
 
-A workspace can make 100 requests per second; use `emails.sendBatch` for many emails at once. `429 daily_limit_reached` means the daily sending limit is reached, and retrying within the second will not help. An error response that is not JSON (from a proxy, say) gets the code `http_error`.
+A workspace can make 100 requests per second; use `emails.sendBatch` for many emails at once. `429 daily_limit_reached` means the daily sending limit is reached, and retrying within the second will not help. Streams add `403 stream_restricted`, `409 stream_exists` and `409 stream_in_use`. An error response that is not JSON (from a proxy, say) gets the code `http_error`.
 
 ## Pagination
 

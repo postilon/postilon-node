@@ -51,6 +51,7 @@ describe("requests", () => {
       template_id: "tmpl_1",
       variables: { name: "Jane" },
       scheduled_at: "2026-11-01T09:00:00Z",
+      stream: "receipts",
     };
 
     const res = await new Postilon(KEY).emails.send(params, { idempotencyKey: "receipt-order-123" });
@@ -75,7 +76,7 @@ describe("requests", () => {
 
   it("sends no body or Content-Type on GET, and builds list queries", async () => {
     const calls = mockFetch(() => json(200, { object: "list", data: [], count: 0, total: 0, has_more: false }));
-    await new Postilon(KEY).emails.list({ status: "bounced", q: "jane", source: "api", days: 7, limit: 50, offset: 100 });
+    await new Postilon(KEY).emails.list({ status: "bounced", q: "jane", source: "api", stream: "receipts", days: 7, limit: 50, offset: 100 });
     const [call] = calls;
     assert.equal(call.method, "GET");
     assert.equal(call.body, undefined);
@@ -86,6 +87,7 @@ describe("requests", () => {
       status: "bounced",
       q: "jane",
       source: "api",
+      stream: "receipts",
       days: "7",
       limit: "50",
       offset: "100",
@@ -110,7 +112,7 @@ describe("requests", () => {
 
   // [description, call, method, path, body]
   const routes = [
-    ["emails.sendBatch", (p) => p.emails.sendBatch({ from: "a@acme.com", batch: [{ to: "b@example.com", variables: { n: "1" } }] }), "POST", "/v1/emails/batch", { from: "a@acme.com", batch: [{ to: "b@example.com", variables: { n: "1" } }] }],
+    ["emails.sendBatch", (p) => p.emails.sendBatch({ from: "a@acme.com", stream: "receipts", batch: [{ to: "b@example.com", variables: { n: "1" } }] }), "POST", "/v1/emails/batch", { from: "a@acme.com", stream: "receipts", batch: [{ to: "b@example.com", variables: { n: "1" } }] }],
     ["emails.get", (p) => p.emails.get("msg_1"), "GET", "/v1/emails/msg_1"],
     ["emails.cancel", (p) => p.emails.cancel("msg_1"), "POST", "/v1/emails/msg_1/cancel"],
     ["domains.create", (p) => p.domains.create({ domain_name: "acme.com" }), "POST", "/v1/domains", { domain_name: "acme.com" }],
@@ -129,7 +131,13 @@ describe("requests", () => {
     ["files.delete", (p) => p.files.delete("file_1"), "DELETE", "/v1/files/file_1"],
     ["suppressions.list", (p) => p.suppressions.list({ offset: 100 }), "GET", "/v1/suppressions?offset=100"],
     ["suppressions.create", (p) => p.suppressions.create({ email_address: "jane@example.com" }), "POST", "/v1/suppressions", { email_address: "jane@example.com" }],
+    ["suppressions.create in a stream", (p) => p.suppressions.create({ email_address: "jane@example.com", reason: "unsubscribe", stream: "newsletter" }), "POST", "/v1/suppressions", { email_address: "jane@example.com", reason: "unsubscribe", stream: "newsletter" }],
     ["suppressions.delete", (p) => p.suppressions.delete("sup_1"), "DELETE", "/v1/suppressions/sup_1"],
+    ["streams.list", (p) => p.streams.list(), "GET", "/v1/streams"],
+    ["streams.create", (p) => p.streams.create({ name: "receipts", description: "Order receipts" }), "POST", "/v1/streams", { name: "receipts", description: "Order receipts" }],
+    ["streams.get", (p) => p.streams.get("receipts"), "GET", "/v1/streams/receipts"],
+    ["streams.update", (p) => p.streams.update("receipts", { description: "Receipts and invoices" }), "PATCH", "/v1/streams/receipts", { description: "Receipts and invoices" }],
+    ["streams.delete", (p) => p.streams.delete("receipts"), "DELETE", "/v1/streams/receipts"],
     ["webhooks.create", (p) => p.webhooks.create({ url: "https://acme.com/hook", subscribed_events: ["email.bounced"] }), "POST", "/v1/webhooks", { url: "https://acme.com/hook", subscribed_events: ["email.bounced"] }],
     ["webhooks.list", (p) => p.webhooks.list(), "GET", "/v1/webhooks"],
     ["webhooks.get", (p) => p.webhooks.get("wh_1"), "GET", "/v1/webhooks/wh_1"],
@@ -167,6 +175,19 @@ describe("errors", () => {
     assert.equal(err.code, "domain_not_verified");
     assert.equal(err.message, message);
     assert.equal(err.rateLimitReset, undefined);
+  });
+
+  it("passes stream error codes through", async () => {
+    for (const [status, code, invoke] of [
+      [403, "stream_restricted", (p) => p.emails.send({ from: "a@acme.com", to: "b@example.com", subject: "s", stream: "newsletter" })],
+      [409, "stream_exists", (p) => p.streams.create({ name: "receipts" })],
+      [409, "stream_in_use", (p) => p.streams.delete("receipts")],
+    ]) {
+      mockFetch(() => json(status, { error: { code, message: "Refused." } }));
+      const err = await invoke(new Postilon(KEY)).catch((e) => e);
+      assert.ok(err instanceof PostilonError);
+      assert.deepEqual([err.status, err.code], [status, code]);
+    }
   });
 
   it("parses X-RateLimit-Reset on 429 rate_limit_exceeded", async () => {

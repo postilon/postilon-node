@@ -2,6 +2,7 @@ import { errorFromResponse } from "./errors.js";
 import { verifyWebhookSignature, type VerifySignatureOptions } from "./signature.js";
 import type {
   CreateDomainParams,
+  CreateStreamParams,
   CreateSuppressionParams,
   CreateTemplateParams,
   CreateWebhookParams,
@@ -21,9 +22,11 @@ import type {
   SendEmailOptions,
   SendEmailParams,
   SendEmailResponse,
+  Stream,
   Suppression,
   Template,
   UpdateDomainParams,
+  UpdateStreamParams,
   UpdateTemplateParams,
   UpdateWebhookParams,
   UploadFileParams,
@@ -68,6 +71,7 @@ export class Postilon {
   readonly suppressions: Suppressions;
   readonly webhooks: Webhooks;
   readonly inbound: Inbound;
+  readonly streams: Streams;
 
   /** @param apiKey A `ps_live_…` or `ps_test_…` key. */
   constructor(apiKey: string, options: PostilonOptions = {}) {
@@ -104,6 +108,7 @@ export class Postilon {
     this.suppressions = new Suppressions(request);
     this.webhooks = new Webhooks(request);
     this.inbound = new Inbound(request);
+    this.streams = new Streams(request);
   }
 }
 
@@ -214,6 +219,7 @@ export class Suppressions {
     return this.request("GET", "/v1/suppressions", { query: { ...params } });
   }
 
+  /** `reason` defaults to `manual`; without `stream` the address is suppressed in every stream. */
   create(params: CreateSuppressionParams): Promise<Suppression> {
     return this.request("POST", "/v1/suppressions", { body: params });
   }
@@ -301,5 +307,35 @@ export class Inbound {
   /** The message as received (RFC 5322). */
   raw(inboundId: string): Promise<string> {
     return this.request("GET", `/v1/inbound/${id(inboundId)}/raw`, { as: "text" });
+  }
+}
+
+/**
+ * Sending streams keep kinds of email apart, each with its own suppressions. `transactional` is
+ * the default stream and cannot be changed or deleted.
+ */
+export class Streams {
+  constructor(private readonly request: RequestFn) {}
+
+  /** Every stream, in one list. */
+  list(): Promise<List<Stream>> {
+    return this.request("GET", "/v1/streams");
+  }
+
+  create(params: CreateStreamParams): Promise<Stream> {
+    return this.request("POST", "/v1/streams", { body: params });
+  }
+
+  get(name: string): Promise<Stream> {
+    return this.request("GET", `/v1/streams/${id(name)}`);
+  }
+
+  update(name: string, params: UpdateStreamParams): Promise<Stream> {
+    return this.request("PATCH", `/v1/streams/${id(name)}`, { body: params });
+  }
+
+  /** Fails with `409 stream_in_use` while an active API key sends in the stream. */
+  delete(name: string): Promise<Deleted> {
+    return this.request("DELETE", `/v1/streams/${id(name)}`);
   }
 }
